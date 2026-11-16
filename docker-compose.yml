@@ -1,0 +1,12 @@
+
+services:
+  extrator-termos:
+    image: nginx:alpine
+    container_name: extrator-termos
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8088:80"
+
+    volumes:
+      - ./site:/usr/share/nginx/html:ro

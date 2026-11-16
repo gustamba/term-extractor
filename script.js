@@ -1,175 +1,133 @@
-const uploadForm = document.getElementById("uploadForm");
-const operationSelect = document.getElementById("operation");
-const extractionOptions = document.getElementById("extractionOptions");
-const submitButton = document.getElementById("submitButton");
-const downloadLink = document.getElementById("downloadLink");
-const statusMessage = document.getElementById("status");
 
-operationSelect.addEventListener("change", () => {
-    const isExtract = operationSelect.value === "extract";
-    extractionOptions.hidden = !isExtract;
-    submitButton.textContent = isExtract ? "Extrair termos" : "Converter para XLSX";
-    clearResult();
-});
+const uploadForm = document.getElementById("uploadForm");
+const submitButton = document.getElementById("submitButton");
+const statusMessage = document.getElementById("status");
+const fileInput = document.getElementById("fileInput");
+const extractionType = document.getElementById("extractionType");
 
 uploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
-    const file = document.getElementById("fileInput").files[0];
-    if (!file) {
-        showStatus("Selecione um arquivo .docx.", "error");
+    const file = fileInput.files[0];
+
+    if (!file || !file.name.toLowerCase().endsWith(".docx")) {
+        showStatus("Selecione um arquivo .docx válido.", "error");
         return;
     }
 
-    if (!file.name.toLowerCase().endsWith(".docx")) {
-        showStatus("Formato inválido. Selecione um arquivo .docx.", "error");
+    if (typeof XLSX === "undefined" || typeof mammoth === "undefined") {
+        showStatus("Não foi possível carregar as bibliotecas. Verifique sua conexão.", "error");
         return;
     }
 
-    clearResult();
     submitButton.disabled = true;
     submitButton.textContent = "Processando...";
-    showStatus("Processando documento...", "info");
 
     try {
         const arrayBuffer = await readFile(file);
+        const result = await mammoth.extractRawText({ arrayBuffer });
+
+        const terms = extractTerms(result.value, extractionType.value);
+
+        if (terms.length === 0) {
+            showStatus("Nenhum termo foi encontrado.", "error");
+            return;
+        }
+
         const workbook = XLSX.utils.book_new();
 
-        if (operationSelect.value === "extract") {
-            const result = await mammoth.extractRawText({ arrayBuffer });
-            const type = document.getElementById("extractionType").value;
-            const terms = extractTerms(result.value, type);
+        const worksheet = XLSX.utils.aoa_to_sheet([
+            ["Glossário"],
+            ...terms.map(term => [term])
+        ]);
 
-            if (terms.length === 0) {
-                showStatus("Nenhum termo foi encontrado no documento.", "error");
-                return;
-            }
+        worksheet["!cols"] = [{ wch: 50 }];
 
-            const worksheet = XLSX.utils.aoa_to_sheet([
-                ["Glossário"],
-                ...terms.map(term => [term])
-            ]);
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Glossário");
-            downloadWorkbook(workbook, buildFileName(file.name, "glossario"));
-            showStatus(`${terms.length} termo(s) encontrado(s). Planilha pronta!`, "success");
-        } else {
-            const result = await mammoth.convertToHtml({ arrayBuffer });
-            const rows = extractDocumentRows(result.value);
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Glossário");
 
-            if (rows.length === 0) {
-                showStatus("Não foi encontrado conteúdo para converter.", "error");
-                return;
-            }
+        const fileName = buildFileName(file.name);
 
-            const worksheet = XLSX.utils.aoa_to_sheet(rows);
-            worksheet["!cols"] = calculateColumnWidths(rows);
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Documento");
-            downloadWorkbook(workbook, buildFileName(file.name, "convertido"));
-            showStatus(`Documento convertido: ${rows.length} linha(s) adicionada(s) à planilha.`, "success");
-        }
+        const excelBuffer = XLSX.write(workbook, {
+            bookType: "xlsx",
+            type: "array"
+        });
+
+        const blob = new Blob([excelBuffer], {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        });
+
+        const url = URL.createObjectURL(blob);
+
+        showStatus(
+            `${terms.length} termo(s) encontrado(s). Clique abaixo para baixar.`,
+            "success",
+            url,
+            fileName
+        );
+
     } catch (error) {
         console.error(error);
-        showStatus("Erro ao processar o documento. Verifique se o arquivo é um DOCX válido.", "error");
+        showStatus("Erro ao processar o documento.", "error");
     } finally {
         submitButton.disabled = false;
-        submitButton.textContent = operationSelect.value === "extract"
-            ? "Extrair termos"
-            : "Converter para XLSX";
+        submitButton.textContent = "Extrair termos";
     }
 });
 
 function readFile(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
+
         reader.onload = event => resolve(event.target.result);
-        reader.onerror = () => reject(new Error("Não foi possível ler o arquivo."));
+        reader.onerror = () => reject(new Error("Erro ao ler arquivo."));
+
         reader.readAsArrayBuffer(file);
     });
 }
 
 function extractTerms(content, type) {
-    const quotesPattern = /("|“)[^"”]+("|”)/g;
-    const capslockPattern = /\b[A-ZÁÀÂÃÉÈÊÍÏÓÔÕÖÚÇÑ]+(?:\s+[A-ZÁÀÂÃÉÈÊÍÏÓÔÕÖÚÇÑ]+)*\b/g;
-
     let matches = [];
+
     if (type === "quotes") {
-        matches = content.match(quotesPattern) || [];
-        return [...new Set(matches.map(term => term.replace(/["“”]/g, "").trim()).filter(Boolean))];
-    }
+        const pattern = /"([^"]+)"|'([^']+)'|“([^”]+)”|‘([^’]+)’/g;
+        let match;
 
-    if (type === "capslock") {
-        matches = content.match(capslockPattern) || [];
-        return [...new Set(matches.map(term => term.trim()).filter(Boolean))];
-    }
-
-    return [];
-}
-
-// Converte parágrafos e tabelas do DOCX em linhas/células do Excel.
-function extractDocumentRows(html) {
-    const parser = new DOMParser();
-    const documentHtml = parser.parseFromString(html, "text/html");
-    const rows = [];
-
-    function addParagraphs(parent) {
-        for (const child of parent.children) {
-            if (child.tagName === "P") {
-                const text = child.textContent.trim();
-                if (text) rows.push([text]);
-            } else if (child.tagName === "TABLE") {
-                for (const tableRow of child.querySelectorAll("tr")) {
-                    const cells = [...tableRow.querySelectorAll(":scope > th, :scope > td")]
-                        .map(cell => cell.textContent.trim());
-                    if (cells.some(Boolean)) rows.push(cells);
-                }
-            } else {
-                addParagraphs(child);
-            }
+        while ((match = pattern.exec(content)) !== null) {
+            const term = match.slice(1).find(Boolean);
+            if (term) matches.push(term.trim());
         }
+
+    } else if (type === "capslock") {
+        const pattern =
+            /\b[A-ZÁÀÂÃÉÈÊÍÏÓÔÕÖÚÇÑ]+(?:\s+[A-ZÁÀÂÃÉÈÊÍÏÓÔÕÖÚÇÑ]+)*\b/g;
+
+        matches = content.match(pattern) || [];
     }
 
-    addParagraphs(documentHtml.body);
-    return rows;
+    return [...new Set(matches.map(term => term.trim()).filter(Boolean))];
 }
 
-function calculateColumnWidths(rows) {
-    const maxColumns = Math.max(...rows.map(row => row.length));
-    return Array.from({ length: maxColumns }, (_, columnIndex) => ({
-        wch: Math.min(
-            Math.max(...rows.map(row => String(row[columnIndex] || "").length), 12),
-            60
-        )
-    }));
-}
-
-function downloadWorkbook(workbook, fileName) {
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const blob = new Blob([excelBuffer], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    });
-
-    const url = URL.createObjectURL(blob);
-    downloadLink.href = url;
-    downloadLink.download = fileName;
-    downloadLink.style.display = "inline-block";
-}
-
-function buildFileName(originalName, suffix) {
+function buildFileName(originalName) {
     const name = originalName.replace(/\.docx$/i, "");
-    return `${name}_${suffix}.xlsx`;
+    return `${name}_glossario.xlsx`;
 }
 
-function showStatus(message, type) {
-    statusMessage.textContent = message;
+function showStatus(message, type, url = null, fileName = null) {
+    statusMessage.innerHTML = "";
     statusMessage.className = type;
-}
 
-function clearResult() {
-    statusMessage.textContent = "";
-    statusMessage.className = "";
-    downloadLink.style.display = "none";
-    if (downloadLink.href.startsWith("blob:")) {
-        URL.revokeObjectURL(downloadLink.href);
+    const text = document.createElement("p");
+    text.textContent = message;
+    statusMessage.appendChild(text);
+
+    if (url && fileName) {
+        const link = document.createElement("a");
+
+        link.href = url;
+        link.download = fileName;
+        link.textContent = "Baixar arquivo Excel";
+        link.className = "download-link";
+
+        statusMessage.appendChild(link);
     }
-    downloadLink.removeAttribute("href");
 }
