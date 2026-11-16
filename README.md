@@ -1,19 +1,14 @@
 # Extrator de Termos
 
-Aplicação simples em HTML, CSS e JavaScript para trabalhar com documentos Word (`.docx`) e gerar planilhas Excel (`.xlsx`).
+Aplicação simples em HTML, CSS e JavaScript para criar glossários a partir de documentos jurídicos para facilitar a utilização em CatTools.
 
 ## Funcionalidades
 
-### 1. Extrair termos
+### Extrair termos
 - Extrai expressões entre aspas.
 - Extrai palavras e expressões em CAIXA ALTA.
 - Gera um arquivo XLSX com um termo por linha.
-
-### 2. Converter DOCX para XLSX
-- Lê o conteúdo do documento Word.
-- Coloca cada parágrafo em uma linha da planilha.
-- Converte as linhas de tabelas do Word em linhas e células da planilha.
-- Gera um arquivo XLSX para download.
+- Formatado para utilizar em projetos de tradução.
 
 ## Tecnologias
 - HTML
@@ -24,13 +19,19 @@ Aplicação simples em HTML, CSS e JavaScript para trabalhar com documentos Word
 
 ## Como executar
 
-Não é necessário instalar Node.js ou configurar um backend.
+### Simples
 
 1. Baixe ou clone o projeto.
 2. Abra o arquivo `index.html` em um navegador moderno.
 3. Escolha a operação desejada.
 4. Selecione um arquivo `.docx`.
 5. Clique no botão para processar e depois em **Baixar arquivo XLSX**.
+
+### Docker
+
+1. Ajuste a porta do docker-compose.yml conforme sua preferência
+2. Abra o terminal na pasta do projeto e execute o comando `docker compose up -d`
+3. Acesse via navegador `localhost:8088`
 
 As bibliotecas Mammoth.js e SheetJS são carregadas por CDN, portanto é necessária conexão com a internet ao abrir a aplicação.
 
